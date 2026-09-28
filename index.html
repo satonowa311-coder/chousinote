@@ -200,7 +200,7 @@ const ITEMS = [
  {id:'back', icon:'☁️', name:'背中の痛み', group:'痛み'},
  {id:'urine', icon:'💧', name:'排尿の変化', group:'排泄'},
  {id:'bowel', icon:'🍃', name:'排便の変化', group:'排泄'},
- {id:'sleep', icon:'🌙', name:'睡眠', group:'生活'},
+ {id:'sleep', icon:'🌙', name:'昨夜は眠れた？', group:'生活'},
  {id:'fatigue', icon:'🫧', name:'疲れやすさ', group:'生活'},
  {id:'condition', icon:'😊', name:'今日の体調', group:'生活'},
  {id:'stumble', icon:'👣', name:'つまずき', group:'出来事', count:true},
@@ -247,18 +247,34 @@ function saveSetup(){
 function saveSettings(){
  localStorage.setItem('cho_settings',JSON.stringify(settings)); renderDaily(); alert('設定を保存しました');
 }
+const SLEEP_LABELS=['よく眠れた','まあまあ眠れた','あまり眠れなかった','ほとんど眠れなかった'];
+const SLEEP_DETAILS=['途中で目が覚めた','寝つきにくかった','痛み・しびれで起きた'];
+function sleepButtons(current){
+ return '<div class="sev">'+SLEEP_LABELS.map((label,i)=>`<button type="button" data-sev="sleep" data-value="${i}" class="${Number.isInteger(current)&&current===i?'sel':''}" onclick="selectSeverity('sleep','${i}',this)">${label}</button>`).join('')+'</div><div class="note" style="margin-top:12px">気になったこと（任意・複数選択）</div><div class="choices">'+SLEEP_DETAILS.map((label,i)=>`<button type="button" class="chip ${sleepDetails.includes(i)?'on':''}" aria-pressed="${sleepDetails.includes(i)}" onclick="toggleSleepDetail(${i})">${label}</button>`).join('')+'</div>';
+}
+function toggleSleepDetail(i){
+ sleepDetails=sleepDetails.includes(i)?sleepDetails.filter(x=>x!==i):[...sleepDetails,i];
+ document.querySelectorAll('[data-sev="sleep"]').forEach(button=>{
+  const choices=button.parentElement.nextElementSibling?.nextElementSibling;
+  if(choices) choices.querySelectorAll('button').forEach((b,j)=>{b.classList.toggle('on',sleepDetails.includes(j));b.setAttribute('aria-pressed',String(sleepDetails.includes(j)));});
+ });
+}
 function severityButtons(id,current=null){
+ if(id==='sleep') return sleepButtons(current);
  return `<div class="sev">${[['0','0 なし'],['1','1 軽い'],['2','2 気になる'],['3','3 強い']].map(([v,l])=>
  `<button data-sev="${id}" data-value="${v}" class="${String(current)===v?'sel':''}" onclick="selectSeverity('${id}','${v}',this)">${l}</button>`).join('')}</div>`;
 }
-let todayVals={};
+const savedToday=getRecords()[fmtDate()]||{};
+let todayVals={...(savedToday.values||{})};
+let sleepDetails=Array.isArray(savedToday.sleepDetails)?savedToday.sleepDetails.filter(i=>Number.isInteger(i)&&i>=0&&i<SLEEP_DETAILS.length):[];
+document.getElementById('memo').value=savedToday.memo||'';
 function selectSeverity(id,v,el){
  todayVals[id]=Number(v);
  el.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('sel')); el.classList.add('sel');
  checkWarning();
 }
 function renderDaily(){
- const chosen=ITEMS.filter(it=>settings[it.id]==='daily');
+ const chosen=ITEMS.filter(it=>settings[it.id]==='daily'||todayVals[it.id]!==undefined||(it.id==='sleep'&&sleepDetails.length));
  document.getElementById('dailyItems').innerHTML = chosen.length ? chosen.map(it=>`<div class="card">
  <div class="item-top"><div class="icon">${it.icon}</div><div class="name">${it.name}</div></div>
  ${severityButtons(it.id,todayVals[it.id])}</div>`).join('') : `<div class="card note">「設定」から毎日記録する項目を選んでください。</div>`;
@@ -271,12 +287,13 @@ function showQuickAdd(){
 }
 function addQuick(id){
  const it=ITEMS.find(x=>x.id===id); if(!it)return;
+ if(document.querySelector('[data-sev="'+id+'"]')){document.getElementById('quickAdd').classList.add('hidden');return;}
  const c=document.createElement('div'); c.className='card'; c.innerHTML=`<div class="item-top"><div class="icon">${it.icon}</div><div class="name">${it.name}</div></div>${severityButtons(id,todayVals[id])}`;
  document.getElementById('dailyItems').appendChild(c); document.getElementById('quickAdd').classList.add('hidden');
 }
 function getRecords(){return JSON.parse(localStorage.getItem('cho_records')||'{}')}
 function saveToday(){
- const recs=getRecords(); recs[fmtDate()]={values:{...todayVals},memo:document.getElementById('memo').value,ts:Date.now()};
+ const recs=getRecords(); recs[fmtDate()]={values:{...todayVals},memo:document.getElementById('memo').value,sleepDetails:[...sleepDetails],sleepScale:'restfulness-v1',ts:Date.now()};
  localStorage.setItem('cho_records',JSON.stringify(recs)); alert('今日の記録を保存しました 🌿'); renderTrend(); renderSummary();
 }
 function checkWarning(){
@@ -290,15 +307,15 @@ function recordsIn(days){
 }
 function renderTrend(){
  const rows=recordsIn(30);
- const chosen=ITEMS.filter(it=>settings[it.id]!=='off' && !it.count).slice(0,5);
+ const chosen=ITEMS.filter(it=>settings[it.id]!=='off' && !it.count);
  const el=document.getElementById('trendContent');
  if(!rows.length){el.innerHTML='<div class="note" style="margin-top:12px">まだ記録がありません。毎日の記録を続けると、ここに変化が表示されます。</div>';return}
  el.innerHTML=chosen.map(it=>{
-   const vals=rows.map(([,r])=>r.values?.[it.id]).filter(v=>v!==undefined);
+   const vals=rows.filter(([,r])=>it.id!=='sleep'||r.sleepScale==='restfulness-v1').map(([,r])=>r.values?.[it.id]).filter(v=>v!==undefined);
    if(!vals.length)return '';
    const avg=(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1);
    const bars=vals.slice(-14).map(v=>`<div class="bar" style="height:${Math.max(8,(v/3)*100)}%"></div>`).join('');
-   return `<div class="trendrow"><div class="trendhead"><b>${it.icon} ${it.name}</b><span>平均 ${avg}</span></div><div class="spark"><div class="bars">${bars}</div></div></div>`;
+   return `<div class="trendrow"><div class="trendhead"><b>${it.icon} ${it.name}</b><span>${it.id==='sleep'?'眠れなさ ':''}平均 ${avg}</span></div><div class="spark"><div class="bars">${bars}</div></div>${it.id==='sleep'?'<div class="note">0＝よく眠れた／3＝ほとんど眠れなかった（今回の更新後の記録）</div>':''}</div>`;
  }).join('');
 }
 function setSummaryDays(n,el){
@@ -307,10 +324,17 @@ function setSummaryDays(n,el){
 function renderSummary(){
  const rows=recordsIn(summaryDays), el=document.getElementById('summaryContent');
  if(!rows.length){el.innerHTML='<div class="note" style="margin-top:12px">まだ記録がありません。</div>';return}
- const chosen=ITEMS.filter(it=>settings[it.id]!=='off').slice(0,10);
+ const chosen=ITEMS.filter(it=>settings[it.id]!=='off');
  let html='<div class="section-title">記録のまとめ</div>';
  chosen.forEach(it=>{
    const vals=rows.map(([,r])=>r.values?.[it.id]).filter(v=>v!==undefined);
+   if(it.id==='sleep'){
+     const latest=rows.filter(([,r])=>r.sleepScale==='restfulness-v1'&&(r.values?.sleep!==undefined||r.sleepDetails?.length)).at(-1);
+     if(latest){const [date,r]=latest;const label=SLEEP_LABELS[r.values?.sleep]||'眠れ具合は未回答';const details=(r.sleepDetails||[]).map(i=>SLEEP_DETAILS[i]).filter(Boolean);
+       html+=`<div class="row"><div class="label">🌙 最近の睡眠<br><span class="mini">${date}</span></div><div class="value">${label}${details.length?'<br>'+details.join('<br>'):''}</div></div>`;
+     }
+     return;
+   }
    if(!vals.length)return;
    const avg=(vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1);
    const recent=vals.slice(-Math.min(5,vals.length)); const ravg=(recent.reduce((a,b)=>a+b,0)/recent.length).toFixed(1);
@@ -331,7 +355,7 @@ function go(id){
  if(id==='trend')renderTrend(); if(id==='summary')renderSummary(); if(id==='settings')renderSettings();
  window.scrollTo({top:0,behavior:'smooth'});
 }
-renderSetup(); renderDaily(); renderTrend(); renderSummary();
+renderSetup(); renderDaily(); renderTrend(); renderSummary(); checkWarning();
 </script>
 </body>
 </html>
