@@ -95,6 +95,7 @@ input[type="date"]{border:1px solid #dbe6e3;border-radius:12px;padding:8px;backg
 .summary-list .row:last-child{border-bottom:0}
 .summary-list .label{font-weight:700}.summary-list .value{text-align:right;color:#57716d}
 @media (max-width:390px){.sev button{min-width:58px;font-size:11px}.brand{font-size:23px}}
+.chip,.sev button{min-height:44px}.summary-list .value{overflow-wrap:anywhere;min-width:0}.summary-list .label{flex-shrink:0;max-width:48%}details{margin-top:12px}summary{cursor:pointer}textarea{font-size:16px}
 </style>
 </head>
 <body>
@@ -175,7 +176,7 @@ input[type="date"]{border:1px solid #dbe6e3;border-radius:12px;padding:8px;backg
   </div>
 </section>
 
-<div class="footer-note">小さな変化に気づけたら、それで十分。<br>今日も、あしたも、わたしらしく。</div>
+<div class="footer-note">小さな変化に気づけたら、それで十分。<br>今日も、あしたも、わたしらしく。<br>項目別の回答版</div>
 </div>
 
 <nav class="nav">
@@ -194,12 +195,13 @@ const ITEMS = [
  {id:'stiff', icon:'🦵', name:'足のつっぱり・こわばり', group:'足'},
  {id:'rhand_numb', icon:'✋', name:'右手のしびれ', group:'手'},
  {id:'lhand_numb', icon:'✋', name:'左手のしびれ', group:'手'},
- {id:'fine_move', icon:'🧩', name:'箸・ボタンなど細かい動作', group:'手'},
+ {id:'chopsticks', icon:'🥢', name:'箸を使う', group:'手'},
+ {id:'buttons', icon:'🧩', name:'ボタンを留める', group:'手'},
  {id:'neck', icon:'🌿', name:'首の痛み', group:'痛み'},
  {id:'shoulder', icon:'🌱', name:'肩・肩甲骨まわりの痛み', group:'痛み'},
  {id:'back', icon:'☁️', name:'背中の痛み', group:'痛み'},
- {id:'urine', icon:'💧', name:'排尿の変化', group:'排泄'},
- {id:'bowel', icon:'🍃', name:'排便の変化', group:'排泄'},
+ {id:'urine', icon:'💧', name:'おしっこの様子', group:'排泄'},
+ {id:'bowel', icon:'🍃', name:'お通じの様子', group:'排泄'},
  {id:'sleep', icon:'🌙', name:'昨夜は眠れた？', group:'生活'},
  {id:'fatigue', icon:'🫧', name:'疲れやすさ', group:'生活'},
  {id:'condition', icon:'😊', name:'今日の体調', group:'生活'},
@@ -355,6 +357,115 @@ function go(id){
  if(id==='trend')renderTrend(); if(id==='summary')renderSummary(); if(id==='settings')renderSettings();
  window.scrollTo({top:0,behavior:'smooth'});
 }
+// Daily answer labels are personal observations, not clinical severity scores.
+const ANSWERS={
+ numb:['なし','すこし','はっきり感じる','強い'],
+ pain:['なし','すこし痛い','痛い','かなり痛い'],
+ action:['困らずできる','少しやりにくい','時間がかかる','できない・手助けが必要']
+};
+const TOILET={
+ urine:[['none','特に困りごとなし'],['difficult','出にくい'],['remaining','出し切れない感じ'],['urgent','急に行きたくなる'],['leak','漏れる'],['sensation','尿意が分かりにくい'],['other','その他・メモ']],
+ bowel:[['none','特に困りごとなし'],['difficult','出にくい・便秘ぎみ'],['remaining','出し切れない感じ'],['sensation','便意が分かりにくい'],['leak','漏れる'],['other','その他・メモ']]
+};
+const CHANGES={ongoing:'前からある',new:'新しく出た',worse:'以前より悪くなった',unsure:'分からない'};
+let toilet=JSON.parse(JSON.stringify(savedToday.toilet||{}));
+let extraItems=new Set();
+for(const id of ['chopsticks','buttons']) settings[id]??=settings.fine_move||'sometimes';
+// Preserve old answers separately; do not reinterpret old toilet or sleep scores.
+let legacyValues={...(savedToday.legacyValues||{})};
+for(const id of ['fine_move','urine','bowel']){
+ if(todayVals[id]!==undefined){legacyValues[id]=todayVals[id];delete todayVals[id];}
+}
+if(savedToday.sleepScale!=='restfulness-v1'&&todayVals.sleep!==undefined){legacyValues.sleep=todayVals.sleep;delete todayVals.sleep;}
+function answerLabels(id){
+ if(id.endsWith('_numb'))return ANSWERS.numb;
+ if(['neck','shoulder','back'].includes(id))return ANSWERS.pain;
+ if(['chopsticks','buttons'].includes(id))return ANSWERS.action;
+ if(id==='sleep')return SLEEP_LABELS;
+ return ['なし','軽い','気になる','強い'];
+}
+function toiletHTML(id){
+ const entry=toilet[id]||{symptoms:[],changes:{},note:''};
+ const choices=TOILET[id].map(([key,label])=>`<button type="button" class="chip ${entry.symptoms.includes(key)?'on':''}" aria-pressed="${entry.symptoms.includes(key)}" onclick="toggleToilet('${id}','${key}')">${label}</button>`).join('');
+ const changes=entry.symptoms.filter(key=>key!=='none').map(key=>`<div class="item"><div>${TOILET[id].find(x=>x[0]===key)?.[1]||''}</div><div class="choices">${Object.entries(CHANGES).map(([change,label])=>`<button type="button" class="chip ${entry.changes?.[key]===change?'on':''}" aria-pressed="${entry.changes?.[key]===change}" onclick="setToiletChange('${id}','${key}','${change}')">${label}</button>`).join('')}</div></div>`).join('');
+ return `<div id="toilet-${id}"><p class="note">当てはまるものを選んでください（複数選択）。未回答のままでも保存できます。</p><div class="choices">${choices}</div>${changes}${entry.symptoms.some(x=>x!=='none')?`<label class="note" for="note-${id}">補足メモ（任意）</label><textarea id="note-${id}" oninput="toilet['${id}'].note=this.value" placeholder="いつから・どんな時など">${escapeHtml(entry.note||'')}</textarea>`:''}<p class="note">新しく出た・悪くなった変化は、主治医に相談してください。</p><details class="note"><summary>病気との関係・相談の目安</summary><p>後縦靱帯骨化症で脊髄が圧迫されると、尿や便の出しにくさ、漏れ、尿意・便意の分かりにくさが起こることがあります。全員に起こるわけではなく、他の原因もあるため、この記録だけで原因は判断できません。</p><p><b>急に尿が出なくなった、急な尿・便の漏れに足の脱力や歩きにくさが伴う場合は、記録だけで待たず、すぐ医療機関へ連絡し救急受診を相談してください。</b></p><a href="https://www.nanbyou.or.jp/entry/98" target="_blank" rel="noopener">難病情報センター</a>・<a href="https://urology-nagoya-u.jp/treatment/disease/nb.php" target="_blank" rel="noopener">名古屋大学（排尿）</a>・<a href="https://www.kibirihah.johas.go.jp/002_sinryou/06_sekison_family.php" target="_blank" rel="noopener">吉備高原医療リハビリテーションセンター（排便）</a></details></div>`;
+}
+function refreshToilet(id){document.getElementById('toilet-'+id).outerHTML=toiletHTML(id);checkWarning();}
+function toggleToilet(id,key){
+ const e=toilet[id]??={symptoms:[],changes:{},note:''};e.changes??={};
+ if(e.symptoms.includes(key)){e.symptoms=e.symptoms.filter(x=>x!==key);delete e.changes[key];}
+ else if(key==='none'){e.symptoms=['none'];e.changes={};e.note='';}
+ else {e.symptoms=e.symptoms.filter(x=>x!=='none');e.symptoms.push(key);}
+ refreshToilet(id);
+}
+function setToiletChange(id,key,value){toilet[id].changes[key]=value;refreshToilet(id);}
+function severityButtons(id,current=null){
+ if(TOILET[id])return toiletHTML(id);
+ if(id==='sleep')return sleepButtons(current);
+ return `<div class="sev">${answerLabels(id).map((label,i)=>`<button type="button" data-sev="${id}" data-value="${i}" aria-pressed="${current===i}" class="${current===i?'sel':''}" onclick="selectSeverity('${id}','${i}',this)">${label}</button>`).join('')}</div>`;
+}
+function selectSeverity(id,v,el){todayVals[id]=Number(v);el.parentElement.querySelectorAll('button').forEach(x=>{x.classList.remove('sel');x.setAttribute('aria-pressed','false');});el.classList.add('sel');el.setAttribute('aria-pressed','true');checkWarning();}
+function dailyCard(it){return `<div class="card" id="daily-${it.id}"><div class="item-top"><div class="icon">${it.icon}</div><div class="name">${it.name}</div></div>${severityButtons(it.id,todayVals[it.id])}</div>`;}
+function renderDaily(){
+ const chosen=ITEMS.filter(it=>settings[it.id]==='daily'||extraItems.has(it.id)||todayVals[it.id]!==undefined||toilet[it.id]?.symptoms?.length||(it.id==='sleep'&&sleepDetails.length));
+ document.getElementById('dailyItems').innerHTML=chosen.map(dailyCard).join('')||'<div class="card note">設定から記録項目を選んでください。</div>';
+}
+function addQuick(id){const it=ITEMS.find(x=>x.id===id);if(!it)return;extraItems.add(id);renderDaily();document.getElementById('quickAdd').classList.add('hidden');}
+function saveToday(){
+ const recs=getRecords();recs[fmtDate()]={...recs[fmtDate()],values:{...todayVals},legacyValues:{...legacyValues},toilet:JSON.parse(JSON.stringify(toilet)),memo:document.getElementById('memo').value,sleepDetails:[...sleepDetails],sleepScale:'restfulness-v1',answerVersion:'natural-v2',ts:Date.now()};
+ try{localStorage.setItem('cho_records',JSON.stringify(recs));}catch(e){alert('保存できませんでした。ブラウザの保存容量・設定を確認してください。');return;}
+ alert('今日の記録を保存しました 🌿');renderTrend();renderSummary();
+}
+function checkWarning(){
+ const changed=Object.values(toilet).some(e=>e.symptoms?.some(k=>k!=='none'&&['new','worse'].includes(e.changes?.[k])));
+ const show=changed||['walk','leg_power'].some(id=>(todayVals[id]??0)>=3);
+ const box=document.getElementById('warningBox');box.textContent='新しく出た・悪くなった変化や、強い歩きにくさ・足の力の入りにくさは、主治医に相談してください。急に尿が出ない、急な尿・便の漏れに足の脱力や歩きにくさが伴う場合は、記録だけで待たず、すぐ医療機関へ連絡し救急受診を相談してください。';box.classList.toggle('hidden',!show);
+}
+function numericRows(rows,id){return rows.filter(([,r])=>Number.isInteger(r.values?.[id])&&(id!=='sleep'||r.sleepScale==='restfulness-v1'));}
+function toiletHistory(rows,id){
+ const entries=rows.filter(([,r])=>r.toilet?.[id]?.symptoms?.length);
+ if(!entries.length)return '';
+ return `<div class="section-title">${id==='urine'?'💧 おしっこの様子':'🍃 お通じの様子'}</div>`+entries.map(([date,r])=>{
+ const e=r.toilet[id];const lines=e.symptoms.map(key=>{const label=TOILET[id].find(x=>x[0]===key)?.[1];return label?escapeHtml(label)+(key!=='none'?'（'+(CHANGES[e.changes?.[key]]||'変化は未回答')+'）':''):'';}).filter(Boolean);
+ return `<div class="row"><div class="label">${date}</div><div class="value">${lines.join('<br>')}${e.note?'<br>'+escapeHtml(e.note):''}</div></div>`;
+ }).join('');
+}
+function legacyHistory(rows){
+ const names={fine_move:'箸・ボタンなど細かい動作',urine:'排尿の変化',bowel:'排便の変化',sleep:'睡眠'};
+ const lines=[];
+ for(const [date,r] of rows)for(const [id,name] of Object.entries(names)){
+ const value=r.legacyValues?.[id]??((id!=='sleep'||r.sleepScale!=='restfulness-v1')?r.values?.[id]:undefined);
+ if(Number.isInteger(value))lines.push(`<div class="row"><div class="label">${date}<br>${name}</div><div class="value">${['なし','軽い','気になる','強い'][value]||value}</div></div>`);
+ }
+ return lines.length?'<details><summary>以前の形式の記録（新しい回答とは別表示）</summary>'+lines.join('')+'</details>':'';
+}
+function renderTrend(){
+ const rows=recordsIn(30),el=document.getElementById('trendContent');
+ if(!rows.length){el.innerHTML='<p class="note">まだ記録がありません。</p>';return;}
+ el.innerHTML='<p class="note">直近30日、各項目の最新14回答。棒が高いほど困りごとが強い回答です。医学的な重症度の点数ではありません。言葉を変更する前の回答とは単純に比較できません。</p>'+ITEMS.filter(it=>!TOILET[it.id]&&!it.count).map(it=>{
+ const entries=numericRows(rows,it.id).slice(-14);if(!entries.length)return '';
+ const labels=answerLabels(it.id);
+ return `<div class="trendrow"><div class="trendhead"><b>${it.icon} ${it.name}</b></div><div class="spark"><div class="bars">${entries.map(([d,r])=>`<div class="bar" title="${d}：${labels[r.values[it.id]]}" style="height:${Math.max(8,r.values[it.id]/3*100)}%"></div>`).join('')}</div></div><div class="note">0：${labels[0]} ／ 3：${labels[3]}</div></div>`;
+ }).join('')+'<div class="summary-list">'+toiletHistory(rows,'urine')+toiletHistory(rows,'bowel')+'</div>'+legacyHistory(rows);
+}
+function renderSummary(){
+ const rows=recordsIn(summaryDays),el=document.getElementById('summaryContent');
+ if(!rows.length){el.innerHTML='<p class="note">まだ記録がありません。</p>';return;}
+ let html=`<div class="section-title">過去${summaryDays}日・記録${rows.length}日</div><p class="note">各項目の最新回答。医療機関の重症度評価ではありません。</p>`;
+ for(const it of ITEMS.filter(x=>!TOILET[x.id])){
+ const latest=numericRows(rows,it.id).at(-1);if(!latest)continue;const [date,r]=latest;
+ let text=answerLabels(it.id)[r.values[it.id]];
+ if(it.id==='sleep')text+='<br>'+(r.sleepDetails||[]).map(i=>SLEEP_DETAILS[i]).filter(Boolean).join('<br>');
+ html+=`<div class="row"><div class="label">${it.icon} ${it.name}<br><span class="mini">${date}</span></div><div class="value">${text}</div></div>`;
+ }
+ const detailOnly=rows.filter(([,r])=>r.values?.sleep===undefined&&r.sleepDetails?.length).at(-1);
+ if(detailOnly)html+=`<div class="row"><div class="label">🌙 睡眠の補足<br>${detailOnly[0]}</div><div class="value">${detailOnly[1].sleepDetails.map(i=>SLEEP_DETAILS[i]).filter(Boolean).join('<br>')}</div></div>`;
+ html+=toiletHistory(rows,'urine')+toiletHistory(rows,'bowel')+legacyHistory(rows);
+ const memo=rows.filter(([,r])=>r.memo).at(-1);if(memo)html+=`<div class="row"><div class="label">📝 最近のメモ<br>${memo[0]}</div><div class="value">${escapeHtml(memo[1].memo)}</div></div>`;
+ el.innerHTML=html;
+}
+
+
 renderSetup(); renderDaily(); renderTrend(); renderSummary(); checkWarning();
 </script>
 </body>
