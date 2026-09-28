@@ -176,7 +176,7 @@ input[type="date"]{border:1px solid #dbe6e3;border-radius:12px;padding:8px;backg
   </div>
 </section>
 
-<div class="footer-note">小さな変化に気づけたら、それで十分。<br>今日も、あしたも、わたしらしく。<br>項目別の回答版</div>
+<div class="footer-note">小さな変化に気づけたら、それで十分。<br>今日も、あしたも、わたしらしく。<br>項目別の回答版・つまずき回数対応</div>
 </div>
 
 <nav class="nav">
@@ -203,7 +203,7 @@ const ITEMS = [
  {id:'urine', icon:'💧', name:'おしっこの様子', group:'排泄'},
  {id:'bowel', icon:'🍃', name:'お通じの様子', group:'排泄'},
  {id:'sleep', icon:'🌙', name:'昨夜は眠れた？', group:'生活'},
- {id:'fatigue', icon:'🫧', name:'疲れやすさ', group:'生活'},
+ {id:'fatigue', icon:'🫧', name:'今日の疲れ', group:'生活'},
  {id:'condition', icon:'😊', name:'今日の体調', group:'生活'},
  {id:'stumble', icon:'👣', name:'つまずき', group:'出来事', count:true},
  {id:'fall', icon:'✨', name:'転倒', group:'出来事', count:true}
@@ -378,6 +378,8 @@ for(const id of ['fine_move','urine','bowel']){
 }
 if(savedToday.sleepScale!=='restfulness-v1'&&todayVals.sleep!==undefined){legacyValues.sleep=todayVals.sleep;delete todayVals.sleep;}
 function answerLabels(id){
+ const labels={walk:['なし','少し歩きにくい','歩きにくい','とても歩きにくい'],leg_power:['なし','少し入りにくい','入りにくい','とても入りにくい'],stiff:['なし','少しある','ある','強い'],fatigue:['なし','少し疲れた','疲れた','とても疲れた'],condition:['よい','少し悪い','悪い','とても悪い']};
+ if(labels[id])return labels[id];
  if(id.endsWith('_numb'))return ANSWERS.numb;
  if(['neck','shoulder','back'].includes(id))return ANSWERS.pain;
  if(['chopsticks','buttons'].includes(id))return ANSWERS.action;
@@ -400,6 +402,7 @@ function toggleToilet(id,key){
 }
 function setToiletChange(id,key,value){toilet[id].changes[key]=value;refreshToilet(id);}
 function severityButtons(id,current=null){
+ if(['stumble','fall'].includes(id))return eventHTML(id);
  if(TOILET[id])return toiletHTML(id);
  if(id==='sleep')return sleepButtons(current);
  return `<div class="sev">${answerLabels(id).map((label,i)=>`<button type="button" data-sev="${id}" data-value="${i}" aria-pressed="${current===i}" class="${current===i?'sel':''}" onclick="selectSeverity('${id}','${i}',this)">${label}</button>`).join('')}</div>`;
@@ -407,12 +410,12 @@ function severityButtons(id,current=null){
 function selectSeverity(id,v,el){todayVals[id]=Number(v);el.parentElement.querySelectorAll('button').forEach(x=>{x.classList.remove('sel');x.setAttribute('aria-pressed','false');});el.classList.add('sel');el.setAttribute('aria-pressed','true');checkWarning();}
 function dailyCard(it){return `<div class="card" id="daily-${it.id}"><div class="item-top"><div class="icon">${it.icon}</div><div class="name">${it.name}</div></div>${severityButtons(it.id,todayVals[it.id])}</div>`;}
 function renderDaily(){
- const chosen=ITEMS.filter(it=>settings[it.id]==='daily'||extraItems.has(it.id)||todayVals[it.id]!==undefined||toilet[it.id]?.symptoms?.length||(it.id==='sleep'&&sleepDetails.length));
+ const chosen=ITEMS.filter(it=>settings[it.id]==='daily'||extraItems.has(it.id)||(it.id==='stumble'&&events.stumble!=null)||(it.id==='fall'&&typeof events.fall?.occurred==='boolean')||todayVals[it.id]!==undefined||toilet[it.id]?.symptoms?.length||(it.id==='sleep'&&sleepDetails.length));
  document.getElementById('dailyItems').innerHTML=chosen.map(dailyCard).join('')||'<div class="card note">設定から記録項目を選んでください。</div>';
 }
 function addQuick(id){const it=ITEMS.find(x=>x.id===id);if(!it)return;extraItems.add(id);renderDaily();document.getElementById('quickAdd').classList.add('hidden');}
 function saveToday(){
- const recs=getRecords();recs[fmtDate()]={...recs[fmtDate()],values:{...todayVals},legacyValues:{...legacyValues},toilet:JSON.parse(JSON.stringify(toilet)),memo:document.getElementById('memo').value,sleepDetails:[...sleepDetails],sleepScale:'restfulness-v1',answerVersion:'natural-v2',ts:Date.now()};
+ const recs=getRecords();recs[fmtDate()]={...recs[fmtDate()],values:{...todayVals},legacyValues:{...legacyValues},toilet:JSON.parse(JSON.stringify(toilet)),memo:document.getElementById('memo').value,sleepDetails:[...sleepDetails],sleepScale:'restfulness-v1',events:JSON.parse(JSON.stringify(events)),answerVersion:'natural-v3',ts:Date.now()};
  try{localStorage.setItem('cho_records',JSON.stringify(recs));}catch(e){alert('保存できませんでした。ブラウザの保存容量・設定を確認してください。');return;}
  alert('今日の記録を保存しました 🌿');renderTrend();renderSummary();
 }
@@ -431,7 +434,7 @@ function toiletHistory(rows,id){
  }).join('');
 }
 function legacyHistory(rows){
- const names={fine_move:'箸・ボタンなど細かい動作',urine:'排尿の変化',bowel:'排便の変化',sleep:'睡眠'};
+ const names={stumble:'つまずき（旧形式）',fall:'転倒（旧形式）',fine_move:'箸・ボタンなど細かい動作',urine:'排尿の変化',bowel:'排便の変化',sleep:'睡眠'};
  const lines=[];
  for(const [date,r] of rows)for(const [id,name] of Object.entries(names)){
  const value=r.legacyValues?.[id]??((id!=='sleep'||r.sleepScale!=='restfulness-v1')?r.values?.[id]:undefined);
@@ -446,13 +449,13 @@ function renderTrend(){
  const entries=numericRows(rows,it.id).slice(-14);if(!entries.length)return '';
  const labels=answerLabels(it.id);
  return `<div class="trendrow"><div class="trendhead"><b>${it.icon} ${it.name}</b></div><div class="spark"><div class="bars">${entries.map(([d,r])=>`<div class="bar" title="${d}：${labels[r.values[it.id]]}" style="height:${Math.max(8,r.values[it.id]/3*100)}%"></div>`).join('')}</div></div><div class="note">0：${labels[0]} ／ 3：${labels[3]}</div></div>`;
- }).join('')+'<div class="summary-list">'+toiletHistory(rows,'urine')+toiletHistory(rows,'bowel')+'</div>'+legacyHistory(rows);
+ }).join('')+'<div class="summary-list">'+toiletHistory(rows,'urine')+toiletHistory(rows,'bowel')+eventHistory(rows)+'</div>'+legacyHistory(rows);
 }
 function renderSummary(){
  const rows=recordsIn(summaryDays),el=document.getElementById('summaryContent');
  if(!rows.length){el.innerHTML='<p class="note">まだ記録がありません。</p>';return;}
  let html=`<div class="section-title">過去${summaryDays}日・記録${rows.length}日</div><p class="note">各項目の最新回答。医療機関の重症度評価ではありません。</p>`;
- for(const it of ITEMS.filter(x=>!TOILET[x.id])){
+ for(const it of ITEMS.filter(x=>!TOILET[x.id]&&!x.count)){
  const latest=numericRows(rows,it.id).at(-1);if(!latest)continue;const [date,r]=latest;
  let text=answerLabels(it.id)[r.values[it.id]];
  if(it.id==='sleep')text+='<br>'+(r.sleepDetails||[]).map(i=>SLEEP_DETAILS[i]).filter(Boolean).join('<br>');
@@ -460,11 +463,43 @@ function renderSummary(){
  }
  const detailOnly=rows.filter(([,r])=>r.values?.sleep===undefined&&r.sleepDetails?.length).at(-1);
  if(detailOnly)html+=`<div class="row"><div class="label">🌙 睡眠の補足<br>${detailOnly[0]}</div><div class="value">${detailOnly[1].sleepDetails.map(i=>SLEEP_DETAILS[i]).filter(Boolean).join('<br>')}</div></div>`;
- html+=toiletHistory(rows,'urine')+toiletHistory(rows,'bowel')+legacyHistory(rows);
+ html+=toiletHistory(rows,'urine')+toiletHistory(rows,'bowel')+eventHistory(rows)+legacyHistory(rows);
  const memo=rows.filter(([,r])=>r.memo).at(-1);if(memo)html+=`<div class="row"><div class="label">📝 最近のメモ<br>${memo[0]}</div><div class="value">${escapeHtml(memo[1].memo)}</div></div>`;
  el.innerHTML=html;
 }
 
+
+let events=JSON.parse(JSON.stringify(savedToday.events||{}));
+for(const id of ['stumble','fall']){
+ if(todayVals[id]!==undefined){legacyValues[id]=todayVals[id];delete todayVals[id];}
+}
+function eventHTML(id){
+ if(id==='stumble'){
+ const n=events.stumble;
+ return `<div id="event-stumble"><div class="choices"><button class="smallbtn" aria-label="つまずきを1回減らす" onclick="stepStumble(-1)" ${!Number.isInteger(n)||n===0?'disabled':''}>−</button><span role="status" style="padding:12px">${Number.isInteger(n)?n+'回':n==='unknown'?'分からない':'未入力'}</span><button class="smallbtn" aria-label="つまずきを1回増やす" onclick="stepStumble(1)">＋</button></div><div class="choices"><button class="chip ${n===0?'on':''}" onclick="setStumble(0)">0回</button><button class="chip ${n==='unknown'?'on':''}" onclick="setStumble('unknown')">分からない</button><button class="chip" onclick="setStumble(null)">未入力に戻す</button></div></div>`;
+ }
+ const f=events.fall||{};
+ return `<div id="event-fall"><div class="choices"><button class="chip ${f.occurred===false?'on':''}" aria-pressed="${f.occurred===false}" onclick="setFall(false)">なし</button><button class="chip ${f.occurred===true?'on':''}" aria-pressed="${f.occurred===true}" onclick="setFall(true)">あり</button><button class="chip" onclick="setFall(null)">未入力に戻す</button></div>${f.occurred===true?`<p><label for="fall-situation">状況メモ（任意）</label></p><textarea id="fall-situation" placeholder="どこで・何をしている時に転んだか" oninput="events.fall.situation=this.value">${escapeHtml(f.situation||'')}</textarea><p><label for="fall-after">けがや、その後の変化（任意）</label></p><textarea id="fall-after" placeholder="痛むところなど" oninput="events.fall.after=this.value">${escapeHtml(f.after||'')}</textarea><p class="note">「あり」だけでも保存できます。</p>`:''}</div>`;
+}
+function setStumble(n){events.stumble=n;document.getElementById('event-stumble').outerHTML=eventHTML('stumble');}
+function stepStumble(delta){const n=Number.isInteger(events.stumble)?events.stumble:0;setStumble(Math.max(0,n+delta));}
+function setFall(value){events.fall={...(events.fall||{}),occurred:value};document.getElementById('event-fall').outerHTML=eventHTML('fall');}
+function eventHistory(rows){
+ const entries=rows.filter(([,r])=>Number.isInteger(r.events?.stumble)||r.events?.stumble==='unknown'||typeof r.events?.fall?.occurred==='boolean');
+ if(!entries.length)return '';
+ const counts=entries.filter(([,r])=>Number.isInteger(r.events?.stumble));
+ const total=counts.reduce((sum,[,r])=>sum+r.events.stumble,0);
+ const fallDays=entries.filter(([,r])=>r.events?.fall?.occurred===true).length;
+ return `<div class="section-title">つまずき・転倒</div><p class="note">つまずき：回数を記録した${counts.length}日で合計${total}回（未入力・分からない日は含みません）。転倒あり：${fallDays}日。</p>`+entries.map(([date,r])=>{
+ const e=r.events,lines=[];
+ if(Number.isInteger(e.stumble))lines.push('つまずき：'+e.stumble+'回');else if(e.stumble==='unknown')lines.push('つまずき：分からない');
+ if(typeof e.fall?.occurred==='boolean'){
+ lines.push('転倒：'+(e.fall.occurred?'あり':'なし'));
+ if(e.fall.occurred){if(e.fall.situation)lines.push('状況：'+escapeHtml(e.fall.situation));if(e.fall.after)lines.push('けが・その後：'+escapeHtml(e.fall.after));}
+ }
+ return `<div class="row"><div class="label">${date}</div><div class="value">${lines.join('<br>')}</div></div>`;
+ }).join('');
+}
 
 renderSetup(); renderDaily(); renderTrend(); renderSummary(); checkWarning();
 </script>
